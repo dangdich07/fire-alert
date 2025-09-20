@@ -1,0 +1,41 @@
+version: '3.9'
+services:
+  db:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ${DB_NAME:-fire_alert_db}
+      MYSQL_USER: ${DB_USER:-app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-app}
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+    command: ["--mysql-native-password=ON", "--default-authentication-plugin=mysql_native_password"]
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: db
+      DB_USER: ${DB_USER:-app}
+      DB_PASSWORD: ${DB_PASSWORD:-app}
+      DB_NAME: ${DB_NAME:-fire_alert_db}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret}
+      IOT_API_KEY: ${IOT_API_KEY:-dev-iot-key}
+      CORS_ORIGIN: ${CORS_ORIGIN:-}
+      PORT: 4000
+    depends_on:
+      - db
+    ports:
+      - "4000:4000"
+    command: ["npm", "start"]
+
+volumes:
+  db_data:
+
+
+
+
