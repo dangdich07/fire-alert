@@ -156,6 +156,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`🔥 Server listening on http://localhost:${PORT}`);
+// Bind to 0.0.0.0 so the server accepts connections from the LAN (e.g., your phone at 192.168.x.x)
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🔥 Server listening on http://0.0.0.0:${PORT}`);
 });
