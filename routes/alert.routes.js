@@ -38,4 +38,36 @@ router.patch('/:id/ack', authRequired, async (req, res) => {
   res.json({ alert });
 });
 
+// Create alert manually (from client) and broadcast to owner
+router.post('/', authRequired, async (req, res) => {
+  const { code, device_id, type, level = 0, message, syncKey } = req.body;
+  if (!code && !device_id) return res.status(400).json({ error: 'Missing device identifier' });
+  if (!type) return res.status(400).json({ error: 'Missing alert type' });
+
+  // find device by id or code
+  let device;
+  if (device_id) device = (await query('SELECT * FROM devices WHERE id = :id', { id: device_id }))[0];
+  else device = (await query('SELECT * FROM devices WHERE code = :code', { code }))[0];
+
+  if (!device) return res.status(404).json({ error: 'Device not found' });
+
+  // ensure caller is owner of device
+  if (device.owner_user_id && device.owner_user_id !== req.user.id) return res.status(403).json({ error: 'Not allowed' });
+
+  // insert alert
+  const result = await query(
+    `INSERT INTO alerts (device_id, type, level, message, is_active) VALUES (:device_id, :type, :level, :message, TRUE)`,
+    { device_id: device.id, type, level, message: message || null }
+  );
+  const alert = (await query('SELECT a.*, d.code, d.name AS device_name, d.location FROM alerts a JOIN devices d ON d.id=a.device_id WHERE a.id=:id', { id: result.insertId }))[0];
+
+  // broadcast to owner
+  if (device.owner_user_id) {
+    await broadcastEvent(device.owner_user_id, 'alert', alert);
+  }
+
+  // return alert with syncKey if provided so client can match
+  return res.status(201).json({ alert: { ...alert, syncKey: syncKey || null } });
+});
+
 export default router;
