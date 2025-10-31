@@ -19,10 +19,9 @@ export const createDeviceSchema = Joi.object({
 
 export const iotEventSchema = Joi.object({
   code: Joi.string().trim().required(),
-  type: Joi.string().valid('smoke', 'fire').required(),
-  level: Joi.number().integer().min(0).max(100).default(0),
-  message: Joi.string().max(300).allow('', null)
-});
+  gas: Joi.number().min(0).required(),
+  flame: Joi.number().min(0).required()
+}).prefs({ abortEarly: false }).unknown(false);
 
 export const heartbeatSchema = Joi.object({
   code: Joi.string().trim().required()
