@@ -14,6 +14,7 @@ DB_NAME=fire_alert_db
 JWT_SECRET=your-jwt-secret
 IOT_API_KEY=your-iot-key
 CORS_ORIGIN=http://localhost:3000,http://localhost:5173
+DEVICE_SUPPRESS_SECONDS=60
 
 # Optional: Firebase for push notifications
 FIREBASE_SERVICE_ACCOUNT_KEY={"type":"service_account",...}
@@ -52,6 +53,7 @@ npm start
 ### IoT Integration
 - `POST /iot/event` - Receive fire/smoke event (header: `x-api-key`)
 - `POST /iot/heartbeat` - Device heartbeat (header: `x-api-key`)
+  - Response includes `suppress_until` and `suppressed` so firmware can pause alerts after users mark a device safe
 
 ### Video Storage
 - `POST /videos/upload` - Upload escape guidance video

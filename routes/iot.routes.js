@@ -3,7 +3,6 @@ import { iotAuth } from '../middleware/iotAuth.js';
 import { query } from '../config/db.js';
 import { iotEventSchema, heartbeatSchema } from '../utils/validators.js';
 import { broadcastEvent } from '../server.js'; // circular-safe
-import { sendPushNotification } from '../config/firebase.js';
 
 const router = Router();
 
@@ -38,17 +37,47 @@ router.post('/event', iotAuth, async (req, res) => {
     device = (await query('SELECT * FROM devices WHERE code = :code', { code }))[0];
   }
 
-  // cập nhật trạng thái
-  await query('UPDATE devices SET status=:status, last_seen=NOW() WHERE id=:id', {
-    id: device.id,
-    status: isAlarm ? 'alarm' : 'ok'
-  });
+  const now = new Date();
+  const suppressUntil = device.suppress_until ? new Date(device.suppress_until) : null;
+  const suppressionActive = suppressUntil && suppressUntil > now;
+  const suppressionExpired = suppressUntil && suppressUntil <= now;
+
+  if (suppressionExpired) {
+    await query('UPDATE devices SET suppress_until=NULL WHERE id=:id', { id: device.id });
+    device.suppress_until = null;
+  }
+
+  const nextStatus = suppressionActive
+    ? 'safe'
+    : (isAlarm ? 'alarm' : 'ok');
+
+  await query(`
+    UPDATE devices
+       SET status=:status,
+           last_seen=NOW()
+     WHERE id=:id
+  `, { id: device.id, status: nextStatus });
+
+  device = (await query('SELECT * FROM devices WHERE id=:id', { id: device.id }))[0];
+  const deviceSuppressed = device.suppress_until ? new Date(device.suppress_until) > new Date() : false;
 
   if (!isAlarm) {
     return res.status(200).json({
       ok: true,
       alert: null,
-      status: 'safe',
+      suppressed: deviceSuppressed,
+      status: device.status,
+      readings: { gas: gasReading, gasStatus, flame: flameReading, flameStatus },
+      suppress_until: device.suppress_until
+    });
+  }
+
+  if (deviceSuppressed) {
+    return res.status(202).json({
+      ok: true,
+      suppressed: true,
+      suppress_until: device.suppress_until,
+      status: device.status,
       readings: { gas: gasReading, gasStatus, flame: flameReading, flameStatus }
     });
   }
@@ -71,6 +100,7 @@ router.post('/event', iotAuth, async (req, res) => {
     payload.gasStatus = gasStatus;
     payload.flame = flameReading;
     payload.flameStatus = flameStatus;
+    payload.suppress_until = device.suppress_until;
     await broadcastEvent(device.owner_user_id, 'alert', payload);
 
     // Send push notification
@@ -85,12 +115,16 @@ router.post('/event', iotAuth, async (req, res) => {
     pushData.gas_status = gasStatus;
     pushData.flame = String(flameReading);
     pushData.flame_status = flameStatus;
-    await sendPushNotification(
-      device.owner_user_id,
+    if (device.suppress_until) {
+      pushData.suppress_until = device.suppress_until.toISOString ? device.suppress_until.toISOString() : `${device.suppress_until}`;
+    }
+    // Push notifications disabled
+      /* device.owner_user_id, */
+      /*
       `🚨 Fire Alert - ${device.name}`,
       `${alertType.toUpperCase()} detected at ${device.location || 'Unknown location'}`,
       pushData
-    );
+    ); */
   }
 
   return res.status(201).json({ ok: true, alert_id: alert.id });
@@ -102,8 +136,39 @@ router.post('/heartbeat', iotAuth, async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   const { code } = value;
-  await query('UPDATE devices SET last_seen=NOW(), status=IF(status="alarm","alarm","ok") WHERE code=:code', { code });
-  return res.json({ ok: true });
+  let device = (await query('SELECT * FROM devices WHERE code = :code', { code }))[0];
+  if (!device) {
+    await query(`INSERT INTO devices (code, name, status) VALUES (:code, :name, 'ok')`, { code, name: `Unclaimed ${code}` });
+    device = (await query('SELECT * FROM devices WHERE code = :code', { code }))[0];
+  }
+
+  const now = new Date();
+  const suppressUntil = device.suppress_until ? new Date(device.suppress_until) : null;
+  const suppressionActive = suppressUntil && suppressUntil > now;
+  const suppressionExpired = suppressUntil && suppressUntil <= now;
+
+  const nextStatus = device.status === 'alarm'
+    ? 'alarm'
+    : suppressionActive
+      ? 'safe'
+      : 'ok';
+
+  await query(
+    `UPDATE devices
+        SET last_seen=NOW(),
+            status=:status${suppressionExpired ? ', suppress_until=NULL' : ''}
+      WHERE code=:code`,
+    { code, status: nextStatus }
+  );
+
+  const updated = (await query('SELECT * FROM devices WHERE code = :code', { code }))[0];
+  const updatedSuppressed = updated.suppress_until ? new Date(updated.suppress_until) > new Date() : false;
+  return res.json({
+    ok: true,
+    status: updated.status,
+    suppressed: updatedSuppressed,
+    suppress_until: updated.suppress_until
+  });
 });
 
 export default router;
