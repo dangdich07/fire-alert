@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS devices (
   location VARCHAR(200),
   owner_user_id INT NULL,
   status ENUM('ok','alarm','safe','offline') NOT NULL DEFAULT 'ok',
+  suppress_until TIMESTAMP NULL,
   last_seen TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (owner_user_id) REFERENCES users(id) ON DELETE SET NULL

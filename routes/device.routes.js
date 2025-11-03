@@ -5,6 +5,7 @@ import { createDeviceSchema } from '../utils/validators.js';
 import { broadcastEvent } from '../server.js';
 
 const router = Router();
+const SUPPRESS_SECONDS = Number(process.env.DEVICE_SUPPRESS_SECONDS || 60);
 
 // Thêm/claim thiết bị IoT
 router.post('/', authRequired, async (req, res) => {
@@ -46,12 +47,15 @@ router.patch('/:id/mark-safe', authRequired, async (req, res) => {
   const own = await query('SELECT * FROM devices WHERE id=:id AND owner_user_id=:uid', { id, uid: req.user.id });
   if (!own.length) return res.status(404).json({ error: 'Device not found' });
 
-  await query('UPDATE devices SET status="safe" WHERE id=:id', { id });
+  const suppressDuration = Number.isFinite(SUPPRESS_SECONDS) && SUPPRESS_SECONDS > 0 ? SUPPRESS_SECONDS : 60;
+  const suppressUntil = new Date(Date.now() + suppressDuration * 1000);
+
+  await query('UPDATE devices SET status="safe", suppress_until=:suppress_until WHERE id=:id', { id, suppress_until: suppressUntil });
   await query('UPDATE alerts SET is_active=FALSE, ack_by_user_id=:uid, resolved_at=NOW() WHERE device_id=:id AND is_active=TRUE', { id, uid: req.user.id });
 
   const device = (await query('SELECT * FROM devices WHERE id=:id', { id }))[0];
-  await broadcastEvent(req.user.id, 'device_update', { id: device.id, status: device.status });
-  res.json({ device });
+  await broadcastEvent(req.user.id, 'device_update', { id: device.id, status: device.status, suppress_until: device.suppress_until });
+  res.json({ device, suppress_until: device.suppress_until });
 });
 
 export default router;
